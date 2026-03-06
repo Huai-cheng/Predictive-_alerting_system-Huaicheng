@@ -1,93 +1,98 @@
-# Unified 12-Dataset Model — Failure Analysis
+# Failure Analysis: Low Precision & High False Positive Rate
 
-**Date:** 2026-03-06  
-**Experiment:** Single LightGBM model trained on all 12 datasets (10 SMD + EC2 + RDS)
+## Problem Statement
+All three datasets produced an unacceptably low precision (EC2: 11%, RDS: 13%) despite meeting the
+80% Recall target. The result was too many false alert dots on every visualization, making the system
+unusable in a production alerting context.
 
 ---
 
-## Failure Summary
+## Root Causes (Ranked by Impact)
 
-The unified model achieved **80.4% recall** (meets target) but produced catastrophically high false positive rates and unacceptably low precision across all 12 datasets.
+### 1. `scale_pos_weight=20` — The Primary Culprit
+**File:** `src/model.py`
 
-| Dataset | Precision | Recall | FP Rate | Verdict |
+```python
+# BAD — was set to 20
+scale_pos_weight=20  # A missed incident is 20x worse than a false alarm
+```
+
+**What went wrong:** This hyperparameter instructs LightGBM to treat every missed incident as 20× more
+costly than a false alarm. The model responded by becoming maximally paranoid — it fires on any tiny
+fluctuation. The correct value for balanced systems is 3–8.
+
+**Fix:** Reduced to `scale_pos_weight=5`.
+
+---
+
+### 2. Recursive Threshold Guardrail Forced Threshold Too Low
+**File:** `jobs/retrain_ec2.py`, `retrain_rds.py`, `retrain_synthetic.py`
+
+```python
+# BAD — kept lowering until recall hit 80%, ignoring precision entirely
+for t in sorted(thresholds_arr, reverse=True):
+    if recall_score(y_test, y_pred_t) >= 0.80:
+        threshold = t; break
+```
+
+**What went wrong:** Youden's J correctly selected a balanced threshold (e.g., 0.12). The guardrail
+then ignored that and pushed it down to 0.001 to force recall above 80%. At threshold 0.001, almost
+every window in the entire 3-day test period triggered an alert.
+
+**Fix:** Removed the guardrail loop. Youden's J threshold is now used as-is. Target is 60–80% recall
+with meaningful precision rather than 80%+ recall with near-zero precision.
+
+---
+
+### 3. Prediction Horizon H=12 Created an Oversized Warning Zone
+**File:** `jobs/retrain_*.py`
+
+```python
+H = 12  # 1-hour prediction horizon
+# y=1 if ANY incident in the NEXT 12 steps (60 minutes)
+```
+
+**What went wrong:** Every window in the 60-minute window before each incident is labeled `y=1`.
+For datasets like RDS where incidents are frequent, this means a large fraction of all windows are
+positive, making the model over-predict universally.
+
+**Fix:** Reduced to `H=6` (30-minute horizon). This makes the positive label zone tighter and more
+precise.
+
+---
+
+### 4. Dynamic Z-Threshold Lowering Mislabelled Noise As Incidents
+**File:** `src/data.py`
+
+```python
+# BAD — minimum floor was 1.5 standard deviations
+while (z_scores.abs() > actual_threshold).sum() < 5 and actual_threshold > 1.5:
+    actual_threshold -= 0.5
+```
+
+**What went wrong:** For the RDS dataset (high natural noise), this auto-lowered the incident threshold
+to Z=1.5, meaning normal moderate fluctuations were labelled as incidents. The model then learned to
+predict incidents at normal CPU variance levels — which is why RDS had alerts everywhere.
+
+**Fix:** Raised the minimum floor from `1.5` → `2.5`. This ensures only genuinely elevated spikes
+become training labels.
+
+---
+
+## Expected Outcome After Fixes
+
+| Dataset | Recall (Before) | Precision (Before) | Recall (After) | Precision (After) |
 |---|---|---|---|---|
-| SMD Server 01 | 3.9% | 93.1% | 93.2% | FAIL |
-| SMD Server 02 | 15.7% | 100% | 73.5% | FAIL |
-| SMD Server 03 | 3.4% | 100% | 51.1% | FAIL |
-| SMD Server 04 | 2.5% | 100% | 70.0% | FAIL |
-| SMD Server 05 | 0.1% | 33.3% | 100% | FAIL |
-| SMD Server 06 | 1.7% | 100% | 92.0% | FAIL |
-| SMD Server 07 | 1.7% | 100% | 97.0% | FAIL |
-| SMD Server 08 | 11.3% | 100% | 72.5% | FAIL |
-| SMD Server 09 | 7.5% | 96.2% | 90.5% | FAIL |
-| SMD Server 10 | 3.9% | 93.6% | 100% | FAIL |
-| EC2 Production | 5.9% | 66.7% | 72.7% | FAIL |
-| RDS Database | 12.0% | 35.1% | 28.4% | FAIL |
+| EC2 | 81% | 11% | ~65–75% | ~35–50% |
+| Synthetic | 100% | 40% | ~85% | ~65–75% |
+| RDS | 97% | 13% | ~55–65% | ~25–35% |
 
-**Required targets:** Precision 20–50% | Recall ~80% | FPR <1%
+**Trade-off accepted:** We deliberately target 60–80% recall instead of 80%+. The resulting system
+fires fewer, higher-confidence alerts that a DevOps team can realistically act on.
 
 ---
 
-## Root Cause Analysis
-
-### Root Cause 1: Global Threshold Too Low (Primary Failure)
-
-The Youden's J statistic selected a **global threshold of 0.009** by optimising on the pooled test set average. At a threshold this close to zero, nearly every prediction across every dataset fires an alert — regardless of what the server is actually doing.
-
-**Why it happened:** Youden's J maximises `Sensitivity + Specificity - 1` on the average distribution. When 12 servers with vastly different noise profiles are pooled, the optimal average point happens to be a near-zero threshold that sacrifices specificity (and therefore FPR) entirely in order to maintain recall across all servers simultaneously.
-
-**Effect:** FPR ranged from 28% to 100% — 28x to 100x worse than the <1% requirement.
-
----
-
-### Root Cause 2: One Global Threshold Cannot Fit 12 Different Servers
-
-Every server has a different noise floor:
-
-- **Quiet servers** (e.g. SMD Server 01): Normal CPU variance is very low. A threshold of 0.009 flags almost every normal 5-minute window as a pre-incident.
-- **Noisy servers** (e.g. SMD Server 10): CPU fluctuates constantly. The model outputs moderate probabilities even during normal operation — again, everything exceeds 0.009.
-
-A threshold calibrated on the pooled average is **too aggressive for quiet servers and incorrectly calibrated for noisy ones.** There is no single threshold value that satisfies FPR <1% across all 12 servers simultaneously.
-
-**Correct approach:** Each server requires its own threshold calibrated to its own noise floor — specifically the 99th percentile of predicted probabilities for normal windows on that server's training data.
-
----
-
-### Root Cause 3: SMD Ground-Truth Labels Not Used
-
-The SMD dataset ships with published anomaly labels in `ServerMachineDataset/test_label/`. Instead, our pipeline computed Z-score labels from the already-normalized [0,1] SMD signals. This introduced two problems:
-
-1. **Label noise:** Z-score on pre-normalized data produces different statistical properties than Z-score on raw CloudWatch data. The "incidents" we labelled may not correspond to real hardware anomalies.
-2. **Label over-generation:** The dynamic Z-threshold lowered itself to 2.0 on some datasets (e.g. Server 05, Server 07) to generate enough training examples, meaning normal fluctuations were labelled as incidents, training the model on corrupted labels.
-
----
-
-### Root Cause 4: Cross-Dataset Feature Distribution Mismatch
-
-The model was trained on a pool where:
-- SMD data: CPU in [0.01, 0.3] (pre-normalized, very compressed)
-- EC2 data: CPU in [0.05, 1.8] (NAB normalized, wider range)
-- RDS data: CPU in [0.01, 0.5] (NAB normalized)
-
-The feature distributions across these 12 sources are **non-stationary** — the model cannot learn a consistent mapping from feature space to incident probability when the underlying value scales are incompatible.
-
----
-
-## What Was Proven
-
-Despite the failure, the experiment established two important empirical facts:
-
-1. **A single global model across heterogeneous servers cannot achieve FPR <1%.** This is a fundamental result, not an implementation bug.
-2. **Per-dataset threshold calibration is non-negotiable.** The architecture must store one threshold per server, calibrated to that server's noise floor, not a pooled average.
-
----
-
-## Correct Architecture (Next Attempt)
-
-| What to Change | Why |
-|---|---|
-| Per-dataset threshold via 99th percentile of normal-class probabilities | Guarantees FPR ≤ 1% by construction |
-| Use SMD published ground-truth labels from `test_label/` folder | Removes corrupted Z-score labels from training |
-| Keep one shared LightGBM model | Good for generalization across server types |
-| Store `{model, thresholds: {dataset_id: float}}` in pkl | One artifact, 12 calibrated operating points |
-| Increase consecutive smoothing from 3 → 6 windows (30 min) | Additional FPR suppression without retraining |
+## Lesson Learned
+> Optimising a single metric (Recall) in isolation, without constraining the other (Precision),
+> produces a system that is technically correct but completely unusable in practice.
+> A production-grade alerting system must balance both.

@@ -20,7 +20,7 @@ MODEL_ARTIFACT_PATH = "s3_mock/model.pkl"
 # W = 288 (1 day)
 # H = 12 (1 hour prediction horizon)
 W = 288
-H = 12
+H = 6   # Phase 5 fix: 30-min horizon (was 12/60min — too wide, inflated positive labels)
 
 def main():
     print("=== Predictive Alerting Periodic Retraining Job (AWS EC2) ===")
@@ -55,30 +55,16 @@ def main():
     print("\n5. Evaluating Model on Held-Out Test Set (20% chronological)...")
     y_proba = model.predict_proba(X_test)[:, 1]
     
-    # Phase 4: Youden's J Statistic Threshold Selection
-    # Sweep the entire ROC curve and pick the point that maximises (Sensitivity + Specificity - 1)
-    # This is the mathematically optimal threshold — no manual floor/cap needed.
+    # Phase 5: Youden's J — use as-is, no recall guardrail (guardrail caused threshold=0.001)
+    # Accepting 60-80% recall in exchange for meaningful precision (35-50%)
     fpr_arr, tpr_arr, thresholds_arr = roc_curve(y_test, y_proba)
     youden_j = tpr_arr - fpr_arr
     optimal_idx = np.argmax(youden_j)
     threshold = float(thresholds_arr[optimal_idx])
     
-    # Safety guardrail: if the optimal point doesn't meet 80% recall, slide threshold down
-    # until we hit recall target. This preserves Youden's J as the starting point.
-    y_pred = (y_proba >= threshold).astype(int)
-    current_recall = recall_score(y_test, y_pred, zero_division=0)
-    if current_recall < 0.80:
-        # Iterate high→low to find the HIGHEST threshold that still meets 80% recall
-        # This keeps false positives as low as possible
-        for t in sorted(thresholds_arr, reverse=True):
-            y_pred_t = (y_proba >= t).astype(int)
-            if recall_score(y_test, y_pred_t, zero_division=0) >= 0.80:
-                threshold = float(t)
-                break
+    print(f"\n[Youden's J] Selected balanced threshold: {threshold:.4f}")
     
-    print(f"\n[Youden's J] Selected optimal threshold: {threshold:.4f}")
-    
-    # Final Predictions based on adjusted threshold
+    # Final Predictions based on balanced threshold
     y_pred = (y_proba >= threshold).astype(int)
     
     print("\nClassification Report (Test Set):")

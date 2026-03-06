@@ -43,7 +43,7 @@ def generate_labels(df: pd.DataFrame, value_col: str = 'value', window_size: int
     # Phase 4: Dynamic Pre-Processing
     actual_threshold = z_threshold
     # Ensure we get at least 5 anomaly points to train the model, drop threshold if necessary
-    while (z_scores.abs() > actual_threshold).sum() < 5 and actual_threshold > 1.5:
+    while (z_scores.abs() > actual_threshold).sum() < 5 and actual_threshold > 2.5:
         actual_threshold -= 0.5
         
     if actual_threshold != z_threshold:

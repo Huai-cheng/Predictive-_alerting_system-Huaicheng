@@ -16,7 +16,7 @@ def get_baseline_model() -> lgb.LGBMClassifier:
         n_estimators=100,
         learning_rate=0.05,
         max_depth=5,
-        scale_pos_weight=20,  # Phase 2 improvement: aggressive recall tuning
+        scale_pos_weight=5,   # Phase 5 fix: balanced precision/recall (was 20, caused near-zero precision)
         random_state=42,
         n_jobs=-1
     )

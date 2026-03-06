@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.dates import DateFormatter
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
 
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -118,7 +119,31 @@ def main():
     ax2.xaxis.set_major_formatter(date_form)
     plt.xticks(rotation=45)
     
-    plt.tight_layout()
+    # --- Evaluation Metrics Text Box ---
+    y_true_horizon = np.max(y_true, axis=1) if len(y_true.shape) > 1 else y_true
+    precision = precision_score(y_true_horizon, y_pred, zero_division=0)
+    recall = recall_score(y_true_horizon, y_pred, zero_division=0)
+    f1 = f1_score(y_true_horizon, y_pred, zero_division=0)
+    
+    if len(np.unique(y_true_horizon)) > 1:
+        tn, fp, fn, tp = confusion_matrix(y_true_horizon, y_pred).ravel()
+    else:
+        cm = confusion_matrix(y_true_horizon, y_pred)
+        tn, fp, fn, tp = (cm[0][0], 0, 0, 0) if y_true_horizon[0] == 0 else (0, 0, 0, cm[0][0])
+
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+    alerts_fired = int(np.sum(y_pred))
+    
+    metrics_text = (f"Precision: {precision:.3f}    Recall: {recall:.3f}    "
+                    f"False Positive Rate: {fpr:.3f}    F1-Score: {f1:.3f}    "
+                    f"Alerts Fired: {alerts_fired}    True Positives: {tp}  |  "
+                    f"Metrics: CPU + RAM + Network In")
+                    
+    fig.text(0.5, 0.08, "Evaluation Metrics (20% Held-Out Test Period)", ha='center', fontsize=12)
+    fig.text(0.5, 0.04, metrics_text, ha='center', fontsize=11, 
+             bbox=dict(boxstyle='round,pad=0.4', facecolor='#f8f9fa', edgecolor='black', alpha=0.8))
+    
+    plt.tight_layout(rect=[0, 0.12, 1, 1])
     plt.savefig(PLOT_OUTPUT_PATH, dpi=150)
     print(f"\nSaved visualization to {PLOT_OUTPUT_PATH}")
 
