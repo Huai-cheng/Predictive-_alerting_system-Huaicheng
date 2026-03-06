@@ -1,0 +1,13 @@
+Dataset,Title,Precision,Recall,F1,FP Rate,Alerts Fired,True Positives,False Positives,Chart
+01_smd_machine_1_1,SMD Server 01 (machine-1-1) — Real Production,0.0388,0.931,0.0745,0.9318,696,27,669,notebooks/results/unified\01_smd_machine_1_1.png
+02_smd_machine_1_2,SMD Server 02 (machine-1-2) — Real Production,0.1571,1.0,0.2715,0.7352,573,90,483,notebooks/results/unified\02_smd_machine_1_2.png
+03_smd_machine_1_3,SMD Server 03 (machine-1-3) — Real Production,0.0335,1.0,0.0648,0.5109,388,13,375,notebooks/results/unified\03_smd_machine_1_3.png
+04_smd_machine_1_4,SMD Server 04 (machine-1-4) — Real Production,0.0247,1.0,0.0481,0.7003,527,13,514,notebooks/results/unified\04_smd_machine_1_4.png
+05_smd_machine_1_5,SMD Server 05 (machine-1-5) — Real Production,0.0013,0.3333,0.0027,1.0,745,1,744,notebooks/results/unified\05_smd_machine_1_5.png
+06_smd_machine_1_6,SMD Server 06 (machine-1-6) — Real Production,0.0174,1.0,0.0343,0.9197,688,12,676,notebooks/results/unified\06_smd_machine_1_6.png
+07_smd_machine_1_7,SMD Server 07 (machine-1-7) — Real Production,0.0166,1.0,0.0326,0.9701,725,12,713,notebooks/results/unified\07_smd_machine_1_7.png
+08_smd_machine_1_8,SMD Server 08 (machine-1-8) — Real Production,0.1127,1.0,0.2026,0.7251,559,63,496,notebooks/results/unified\08_smd_machine_1_8.png
+09_smd_machine_2_1,SMD Server 09 (machine-2-1) — Real Production,0.0751,0.9623,0.1393,0.9049,679,51,628,notebooks/results/unified\09_smd_machine_2_1.png
+10_smd_machine_2_2,SMD Server 10 (machine-2-2) — Real Production,0.0389,0.9355,0.0747,1.0,745,29,716,notebooks/results/unified\10_smd_machine_2_2.png
+11_ec2_production,AWS EC2 CPU (Real CloudWatch) — CPU Only,0.0593,0.6667,0.1088,0.7268,540,32,508,notebooks/results/unified\11_ec2_production.png
+12_rds_database,AWS RDS CPU (Real CloudWatch) — CPU Only,0.1198,0.3514,0.1787,0.2838,217,26,191,notebooks/results/unified\12_rds_database.png
